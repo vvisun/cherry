@@ -128,10 +128,26 @@ func ToString(value interface{}) string {
 }
 
 func ToStringSlice(val []interface{}) []string {
-	var result []string
+	if len(val) == 0 {
+		return []string{}
+	}
+
+	// 优化：先统计字符串数量，预分配容量，减少内存重新分配
+	count := 0
 	for _, item := range val {
-		v, ok := item.(string)
-		if ok {
+		if _, ok := item.(string); ok {
+			count++
+		}
+	}
+
+	if count == 0 {
+		return []string{}
+	}
+
+	// 预分配容量，避免多次扩容
+	result := make([]string, 0, count)
+	for _, item := range val {
+		if v, ok := item.(string); ok {
 			result = append(result, v)
 		}
 	}

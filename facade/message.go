@@ -2,6 +2,7 @@ package cherryFacade
 
 import (
 	"strings"
+	"sync"
 
 	cconst "github.com/cherry-game/cherry/const"
 	cerr "github.com/cherry-game/cherry/error"
@@ -133,21 +134,55 @@ func NewPath(nodeID, actorID interface{}) string {
 	return cstring.ToString(nodeID) + cconst.DOT + cstring.ToString(actorID)
 }
 
+type actorPathResult struct {
+	actorPath *ActorPath
+	err       error
+}
+
+var (
+	actorPathCache = &sync.Map{} // key: path string, value: *actorPathResult
+)
+
 func ToActorPath(path string) (*ActorPath, error) {
 	if path == "" {
 		return nil, cerr.ActorPathError
 	}
 
-	p := strings.Split(path, cconst.DOT)
-	pLen := len(p)
-
-	if pLen == 2 {
-		return NewActorPath(p[0], p[1], ""), nil
+	if cached, ok := actorPathCache.Load(path); ok {
+		result := cached.(*actorPathResult)
+		return result.actorPath, result.err
 	}
 
-	if len(p) == 3 {
-		return NewActorPath(p[0], p[1], p[2]), nil
+	// 使用 IndexByte 手动分割，避免 strings.Split 创建切片
+	// 查找第一个分隔符的位置
+	firstDot := strings.IndexByte(path, '.')
+	if firstDot == -1 {
+		// 没有找到分隔符，无效路径
+		return nil, cerr.ActorPathError
 	}
 
-	return nil, cerr.ActorPathError
+	// 提取 NodeID (第一个点之前的部分)
+	nodeID := path[:firstDot]
+
+	// 查找第二个分隔符的位置（从第一个点之后开始）
+	secondDot := strings.IndexByte(path[firstDot+1:], '.')
+	if secondDot == -1 {
+		// 只有两个部分: NodeID.ActorID
+		actorID := path[firstDot+1:]
+		actorPathCache.Store(path, &actorPathResult{actorPath: NewActorPath(nodeID, actorID, ""), err: nil})
+		return NewActorPath(nodeID, actorID, ""), nil
+	}
+
+	// 有三个部分: NodeID.ActorID.ChildID
+	// secondDot 是相对于 firstDot+1 的位置，需要加上偏移
+	actorID := path[firstDot+1 : firstDot+1+secondDot]
+	childID := path[firstDot+1+secondDot+1:]
+
+	// 检查是否有第四个部分（无效）
+	if strings.IndexByte(childID, '.') != -1 {
+		return nil, cerr.ActorPathError
+	}
+
+	actorPathCache.Store(path, &actorPathResult{actorPath: NewActorPath(nodeID, actorID, childID), err: nil})
+	return NewActorPath(nodeID, actorID, childID), nil
 }
